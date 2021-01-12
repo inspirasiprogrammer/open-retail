@@ -53,6 +53,8 @@ namespace OpenRetail.App.Cashier.Main
         private ILog _log;
 
         private ThreadHelper _lightSleeper = new ThreadHelper();
+        private BackgroundWorker _backgroundWorker = null;
+        private bool _isCheckOnlineUpdateBackgroundWorker;
 
         public bool IsLogout { get; private set; }
 
@@ -117,7 +119,40 @@ namespace OpenRetail.App.Cashier.Main
             SetMenuId();
             SetDisabledMenuAndToolbar(menuStrip1, toolStrip1);
             
-            AutoUpdater.CheckForUpdateEvent += AutoUpdaterOnCheckForUpdateEvent;            
+            AutoUpdater.CheckForUpdateEvent += AutoUpdaterOnCheckForUpdateEvent;
+            RunOnlineUpdateBackgroundWorker();
+        }
+
+        private void RunOnlineUpdateBackgroundWorker()
+        {
+            _isCheckOnlineUpdateBackgroundWorker = true;
+
+            _backgroundWorker = new BackgroundWorker();
+            _backgroundWorker.DoWork += DoWorkEventHandler;
+            _backgroundWorker.RunWorkerCompleted += DoWorkCompletedEventHandler;
+            _backgroundWorker.RunWorkerAsync();
+        }
+
+        private void DoWorkEventHandler(object sender, DoWorkEventArgs e)
+        {
+            if (MainProgram.onlineUpdateUrlInfo.Length > 0)
+            {
+                using (new StCursor(Cursors.WaitCursor, new TimeSpan(0, 0, 0, 0)))
+                {
+                    AutoUpdater.Start(MainProgram.onlineUpdateUrlInfo);
+
+                    while (!_lightSleeper.HasBeenCanceled)
+                    {
+                        _lightSleeper.Sleep(10000);
+                    }
+                }
+            }
+        }
+
+        private void DoWorkCompletedEventHandler(object sender, RunWorkerCompletedEventArgs e)
+        {
+            _backgroundWorker.DoWork -= DoWorkEventHandler;
+            _backgroundWorker.RunWorkerCompleted -= DoWorkCompletedEventHandler;
         }
 
         private void AutoUpdaterOnCheckForUpdateEvent(UpdateInfoEventArgs args)
@@ -128,10 +163,13 @@ namespace OpenRetail.App.Cashier.Main
             {
                 if (args.IsUpdateAvailable)
                 {                    
-                    var msg = "Update terbaru versi {0} sudah tersedia. Saat ini Anda sedang menggunakan Versi {1}\n\nApakah Anda ingin memperbarui aplikasi ini sekarang ?";
+                    var msg = "Update terbaru versi {0} sudah tersedia. Saat ini Anda sedang menggunakan versi {1}\n\nApakah Anda ingin memperbarui aplikasi ini sekarang ?";
 
-                    var installedVersion = string.Format("{0}.{1}.{2}.{3} (v{0}.{1}.{2}{4})", args.InstalledVersion.Major, args.InstalledVersion.Minor, args.InstalledVersion.Build, args.InstalledVersion.Revision, MainProgram.stageOfDevelopment);
-                    var currentVersion = string.Format("{0}.{1}.{2}.{3}", args.CurrentVersion.Major, args.CurrentVersion.Minor, args.CurrentVersion.Build, args.CurrentVersion.Revision);
+                    var installedVersion = string.Format("{0}.{1}.{2}",
+                        args.InstalledVersion.Major, args.InstalledVersion.Minor, args.InstalledVersion.Build, MainProgram.stageOfDevelopment);
+
+                    var currentVersion = string.Format("{0}.{1}.{2}",
+                        args.CurrentVersion.Major, args.CurrentVersion.Minor, args.CurrentVersion.Build);
 
                     var dialogResult = MessageBox.Show(string.Format(msg, currentVersion, installedVersion), "Update Tersedia",
                                                        MessageBoxButtons.YesNo,
@@ -151,12 +189,14 @@ namespace OpenRetail.App.Cashier.Main
                 }
                 else
                 {
-                    MessageBox.Show("Tidak ada update yang tersedia, silahkan dicoba lagi nanti.", "Update belum tersedia", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    if (!_isCheckOnlineUpdateBackgroundWorker)
+                        MessageBox.Show("Tidak ada update yang tersedia, silahkan dicoba lain waktu.", "Update belum tersedia", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             else
             {
-                MessageBox.Show("Gagal melakukan koneksi ke server, silahkan dicoba lagi nanti.", "Cek update terbaru gagal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (!_isCheckOnlineUpdateBackgroundWorker)
+                    MessageBox.Show("Gagal melakukan koneksi ke server, silahkan dicoba lain waktu.", "Cek update terbaru gagal", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -447,6 +487,8 @@ namespace OpenRetail.App.Cashier.Main
         {
             if (MainProgram.onlineUpdateUrlInfo.Length > 0)
             {
+                _isCheckOnlineUpdateBackgroundWorker = false;
+
                 using (new StCursor(Cursors.WaitCursor, new TimeSpan(0, 0, 0, 0)))
                 {
                     AutoUpdater.Start(MainProgram.onlineUpdateUrlInfo);
